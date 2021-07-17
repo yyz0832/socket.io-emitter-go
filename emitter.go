@@ -3,7 +3,8 @@ package emitter
 import (
 	"bytes"
 	"fmt"
-	"gopkg.in/redis.v5"
+
+	"github.com/go-redis/redis"
 	"gopkg.in/vmihailenco/msgpack.v2"
 )
 
@@ -82,6 +83,46 @@ func (e *Emitter) Close() {
 	if e.redis != nil {
 		e.redis.Close()
 	}
+}
+
+func (e *Emitter) EmitToRoom(room string, data ...interface{}) (*Emitter, error) {
+	return e.EmitToRooms([]string{room}, data...)
+}
+
+func (e *Emitter) EmitToRooms(rooms []string, data ...interface{}) (*Emitter, error) {
+	packet := make(map[string]interface{})
+	packet["type"] = gEvent
+	if hasBin(data...) {
+		packet["type"] = gBinaryEvent
+	}
+
+	packet["data"] = data
+	packet["nsp"] = "/"
+
+	opts := map[string]interface{}{
+		"rooms": rooms,
+		"flags": e.flags,
+	}
+
+	chn := fmt.Sprintf("%s#%s#", e.prefix, packet["nsp"])
+
+	buf, err := msgpack.Marshal([]interface{}{uid, packet, opts})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rooms) > 0 {
+		for _, room := range rooms {
+			chnRoom := fmt.Sprintf("%s%s#", chn, room)
+			e.redis.Publish(chnRoom, string(buf))
+		}
+	} else {
+		e.redis.Publish(chn, string(buf))
+	}
+
+	// e.rooms = make([]string, 0, 0)
+	// e.flags = make(map[string]interface{})
+	return e, nil
 }
 
 // Emit Send the packet
